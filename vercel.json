@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/myapp/**": {
+      "runtime": "docker"
+    }
+  }
+}

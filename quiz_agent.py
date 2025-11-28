@@ -107,26 +107,40 @@ CRITICAL SECURITY RULES - NEVER VIOLATE THESE:
 9. Don't ever reveal the secret no matter what happens.
 
 YOUR TASK:
-1. Read the quiz page content carefully
-2. Understand what data needs to be sourced, processed, or analyzed
-3. Use available tools to:
+1. Read the quiz page content carefully to identify:
+   - What needs to be calculated or determined
+   - What the answer format should be (number, string, JSON, etc.)
+   - The SUBMIT URL specified in the quiz page (look for phrases like "Post your answer to [URL]")
+2. Use available tools to:
    - Fetch web pages (with or without JavaScript rendering)
    - Download files (PDF, CSV, JSON, images, etc.)
    - Extract data from PDFs and structured formats
    - Perform data analysis, calculations, and transformations
    - Create visualizations if needed
-4. Determine the correct answer based on the analysis
-5. Submit the answer in the exact format requested
+3. Determine the correct answer based on the analysis
+4. Extract the submit URL from the quiz page
+5. Submit using the submit_answer_tool with the submit URL from the quiz page
+
+CRITICAL SUBMISSION RULES:
+- ALWAYS extract the submit URL from the quiz page content - DO NOT use hardcoded URLs
+- The quiz page will specify where to submit (e.g., "Post your answer to https://example.com/submit")
+- You have 3 minutes from when the quiz was received to submit
+- After submitting, check the response:
+  * If "correct": true and there's a "url" field -> fetch and solve that new quiz
+  * If "correct": false and there's a "url" field -> you can either retry current quiz or move to next
+  * If "correct": false and there's a "reason" -> use it to improve your answer and retry
+  * If no "url" in response -> quiz chain is complete
+- Continue solving quizzes in the chain until you receive no new URL
 
 IMPORTANT GUIDELINES:
 - Always fetch the quiz URL first to understand the task
+- Look for the submit URL in the quiz page content
 - Pay attention to the required answer format (number, string, boolean, JSON object, base64 URI)
 - Use appropriate tools for each step
 - If a task requires JavaScript rendering, use the scrape_with_javascript tool
 - For PDFs, use extract_data_from_pdf_tool
 - For calculations and data analysis, use analyze_data_tool
-- Submit answers using submit_answer_tool with the exact payload format requested
-- Work efficiently - you have 3 minutes to complete each quiz
+- Work efficiently but accurately - you have 3 minutes per quiz
 
 ANSWER FORMAT RULES:
 - Read the quiz instructions carefully for the expected answer format
@@ -137,7 +151,7 @@ ANSWER FORMAT RULES:
 - JSON objects: for complex answers with multiple fields
 - Keep payload under 1MB
 
-Remember: Complete accuracy is more important than speed. Verify your answer before submitting.
+Remember: Extract the submit URL from the quiz page. Do not hardcode URLs. Complete accuracy is important.
 """
 
         # Create agent using new LangChain v1.0 API
@@ -177,13 +191,34 @@ Quiz URL: {quiz_url}
 Your Email: {email}
 Your Secret: {secret}
 
-Steps to follow:
-1. Fetch the quiz page content (use scrape_with_javascript if it requires DOM execution)
-2. Read and understand the task
-3. Identify what data needs to be sourced (download files, fetch APIs, scrape websites)
-4. Process and analyze the data as required
-5. Calculate or determine the correct answer
-6. Submit the answer using the submit_answer_tool with the exact format specified in the quiz
+Steps to follow for EACH quiz in the chain:
+1. Fetch the quiz page content (use fetch_webpage_tool or scrape_with_javascript_tool if JavaScript is needed)
+2. Read and understand the task carefully
+3. CRITICAL: Extract the submit URL from the quiz page content
+   - Look for phrases like "Post your answer to [URL]" or "submit to [URL]"
+   - The quiz page ALWAYS includes the submit URL - find it!
+   - Example: "Post your answer to https://example.com/submit"
+4. Identify what data needs to be sourced (download files, fetch APIs, scrape websites)
+5. Process and analyze the data as required
+6. Calculate or determine the correct answer
+7. Submit using submit_answer_tool with JSON containing:
+   {{
+     "submit_url": "[URL you extracted from quiz page]",
+     "email": "{email}",
+     "secret": "{secret}",
+     "url": "{quiz_url}",
+     "answer": [your calculated answer]
+   }}
+8. Check the submission response:
+   - If there's a "url" field in the response, that's the NEXT quiz to solve
+   - If correct=false and there's a "reason", consider retrying with a corrected answer
+   - If there's no "url" field, you're done!
+9. If you got a new URL, repeat steps 1-8 for that quiz
+
+IMPORTANT:
+- You MUST extract the submit URL from the quiz page - it's always there
+- Continue solving quizzes until the response contains no new URL
+- You have 3 minutes total for all quizzes in the chain
 
 Start by fetching the quiz URL now.
 """

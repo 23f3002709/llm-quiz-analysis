@@ -6,8 +6,9 @@ import os
 import base64
 import json
 import logging
+import math
 from typing import Dict, Any, Optional, Union
-from io import BytesIO
+from io import BytesIO, StringIO
 import asyncio
 
 import httpx
@@ -16,7 +17,52 @@ from bs4 import BeautifulSoup
 from PyPDF2 import PdfReader
 from langchain_core.tools import tool
 
+# Optional imports with graceful fallback
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')  # Non-GUI backend
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def _extract_clean_text(soup: BeautifulSoup) -> str:
+    """
+    Extract clean text from a BeautifulSoup object.
+    Removes scripts, styles, and normalizes whitespace.
+
+    Args:
+        soup: BeautifulSoup object
+
+    Returns:
+        Clean text content
+    """
+    # Remove script and style elements
+    for script in soup(["script", "style"]):
+        script.decompose()
+
+    # Get text content
+    text = soup.get_text()
+
+    # Clean up whitespace
+    lines = (line.strip() for line in text.splitlines())
+    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+    text = '\n'.join(chunk for chunk in chunks if chunk)
+
+    return text
 
 
 # ============================================================================
@@ -40,19 +86,9 @@ def fetch_webpage_tool(url: str) -> str:
         response = httpx.get(url, timeout=30.0, follow_redirects=True)
         response.raise_for_status()
 
-        # Parse with BeautifulSoup to get cleaner text
+        # Parse with BeautifulSoup and extract clean text
         soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Remove script and style elements
-        for script in soup(["script", "style"]):
-            script.decompose()
-
-        # Get text content
-        text = soup.get_text()
-        # Clean up whitespace
-        lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text = '\n'.join(chunk for chunk in chunks if chunk)
+        text = _extract_clean_text(soup)
 
         logger.info(f"Successfully fetched {len(text)} characters from {url}")
         return text
@@ -74,11 +110,11 @@ def scrape_with_javascript_tool(url: str) -> str:
     Returns:
         Rendered HTML content as string
     """
+    if not PLAYWRIGHT_AVAILABLE:
+        return "Error: Playwright is not installed. Run: pip install playwright && playwright install chromium"
+
     try:
         logger.info(f"Scraping with JavaScript: {url}")
-
-        # Import playwright here to avoid loading it if not needed
-        from playwright.sync_api import sync_playwright
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -87,27 +123,20 @@ def scrape_with_javascript_tool(url: str) -> str:
             # Navigate and wait for page to load
             page.goto(url, wait_until="networkidle", timeout=30000)
 
-            # Wait a bit for any dynamic content
+            # Wait for dynamic content
             page.wait_for_timeout(2000)
 
-            # Get the rendered HTML
+            # Get the rendered HTML content
             content = page.content()
-
-            # Also get the text content
-            text_content = page.inner_text('body')
 
             browser.close()
 
-        # Parse with BeautifulSoup for cleaner extraction
+        # Parse with BeautifulSoup and extract clean text
         soup = BeautifulSoup(content, 'html.parser')
+        text = _extract_clean_text(soup)
 
-        # Extract text from result div if it exists
-        result_div = soup.find(id='result')
-        if result_div:
-            text_content = result_div.get_text(strip=True)
-
-        logger.info(f"Successfully scraped {len(text_content)} characters from {url}")
-        return text_content
+        logger.info(f"Successfully scraped {len(text)} characters from {url}")
+        return text
 
     except Exception as e:
         logger.error(f"Error scraping with JavaScript {url}: {str(e)}")
@@ -238,7 +267,6 @@ def analyze_data_tool(data_description: str) -> str:
             df = pd.read_json(BytesIO(data_input.encode()))
         else:
             # Try CSV string
-            from io import StringIO
             df = pd.read_csv(StringIO(data_input))
 
         if df is None or df.empty:
@@ -299,7 +327,6 @@ def execute_calculation_tool(expression: str) -> str:
         }
 
         # Also allow math functions
-        import math
         for name in dir(math):
             if not name.startswith('_'):
                 allowed_names[name] = getattr(math, name)
@@ -334,12 +361,11 @@ def create_visualization_tool(viz_params: str) -> str:
     Returns:
         Base64-encoded image URI (data:image/png;base64,...)
     """
+    if not MATPLOTLIB_AVAILABLE:
+        return "Error: Matplotlib is not installed. Run: pip install matplotlib"
+
     try:
         logger.info("Creating visualization")
-
-        import matplotlib
-        matplotlib.use('Agg')  # Non-GUI backend
-        import matplotlib.pyplot as plt
 
         params = json.loads(viz_params)
         chart_type = params.get('type', 'bar')
@@ -352,7 +378,6 @@ def create_visualization_tool(viz_params: str) -> str:
         if data_input.startswith('[') or data_input.startswith('{'):
             df = pd.read_json(BytesIO(data_input.encode()))
         else:
-            from io import StringIO
             df = pd.read_csv(StringIO(data_input))
 
         # Create plot

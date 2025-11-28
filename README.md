@@ -218,45 +218,108 @@ llm-quiz-analysis/
 python main.py
 ```
 
-### Production Deployment
+### Azure Function App Deployment
 
-For production, use a production ASGI server:
+This application is configured to run as an Azure Function App using the Python v2 programming model.
+
+#### Prerequisites
+- Azure CLI installed
+- Azure subscription
+- Azure Functions Core Tools v4
+
+#### Deployment Steps
+
+1. **Install Azure Functions Core Tools**
+```bash
+npm install -g azure-functions-core-tools@4 --unsafe-perm true
+```
+
+2. **Login to Azure**
+```bash
+az login
+```
+
+3. **Create a Resource Group** (if you don't have one)
+```bash
+az group create --name llm-quiz-rg --location eastus
+```
+
+4. **Create a Storage Account** (required for Azure Functions)
+```bash
+az storage account create \
+  --name llmquizstorage \
+  --resource-group llm-quiz-rg \
+  --location eastus \
+  --sku Standard_LRS
+```
+
+5. **Create a Function App**
+```bash
+az functionapp create \
+  --resource-group llm-quiz-rg \
+  --consumption-plan-location eastus \
+  --runtime python \
+  --runtime-version 3.11 \
+  --functions-version 4 \
+  --name llm-quiz-analysis \
+  --storage-account llmquizstorage \
+  --os-type Linux
+```
+
+6. **Configure Application Settings**
+```bash
+az functionapp config appsettings set \
+  --name llm-quiz-analysis \
+  --resource-group llm-quiz-rg \
+  --settings \
+    AZURE_AI_ENDPOINT="your-azure-endpoint" \
+    AZURE_AI_CREDENTIAL="your-azure-credential" \
+    AZURE_MODEL_NAME="gpt-4o" \
+    AZURE_API_VERSION="2024-05-01-preview" \
+    STUDENT_EMAIL="your-email@example.com" \
+    QUIZ_SECRET="your-secret"
+```
+
+7. **Deploy the Function App**
+```bash
+func azure functionapp publish llm-quiz-analysis
+```
+
+#### Post-Deployment Configuration
+
+**Install Playwright in Azure**
+
+Since Playwright requires browser binaries, you'll need to use a startup command:
 
 ```bash
-pip install gunicorn
-
-gunicorn main:app \
-  --workers 4 \
-  --worker-class uvicorn.workers.UvicornWorker \
-  --bind 0.0.0.0:8000 \
-  --timeout 300
+az functionapp config set \
+  --name llm-quiz-analysis \
+  --resource-group llm-quiz-rg \
+  --startup-file "playwright install chromium && python -m azure.functions.worker"
 ```
 
-### Docker Deployment
+Alternatively, consider using a custom Docker container for better control over dependencies.
 
-Create a `Dockerfile`:
+#### Testing Your Deployment
 
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install --with-deps chromium
-
-COPY . .
-
-EXPOSE 8000
-
-CMD ["python", "main.py"]
-```
-
-Build and run:
 ```bash
-docker build -t llm-quiz-analysis .
-docker run -p 8000:8000 --env-file .env llm-quiz-analysis
+curl -X POST https://llm-quiz-analysis.azurewebsites.net/api/quiz \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "your-email@example.com",
+    "secret": "your-secret",
+    "url": "https://tds-llm-analysis.s-anand.net/demo"
+  }'
 ```
+
+#### Monitoring
+
+View logs in real-time:
+```bash
+func azure functionapp logstream llm-quiz-analysis
+```
+
+Or use Application Insights for detailed monitoring.
 
 ## Troubleshooting
 
@@ -313,24 +376,3 @@ LOG_LEVEL=DEBUG python main.py
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
-
-## Contact
-
-For questions or support, please open an issue on GitHub.
-
-## Acknowledgments
-
-- Built with [LangChain](https://www.langchain.com/)
-- Powered by [Azure AI](https://azure.microsoft.com/en-us/products/ai-services)
-- Uses [FastAPI](https://fastapi.tiangolo.com/)
-- Web scraping with [Playwright](https://playwright.dev/)
